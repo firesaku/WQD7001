@@ -1,0 +1,1089 @@
+---
+title: "From gene expression to prognostic modeling: a comprehensive data analysis of cellular pyroptosis genes"
+author: "WQD 7004 Group3"
+date: "2023-11-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##00.Background Introduction and Purpose Statement
+
+###Background: Breast Cancer (BC) is one of the most common cancers among women globally, with significant variations in incidence and mortality rates worldwide. Despite advances in treatments such as chemotherapy, endocrine therapy, targeted drug therapy, and radiation therapy, which have effectively improved patient survival rates, the prognosis of breast cancer patients still needs improvement. In recent years, programmed cell death mechanisms like pyroptosis, apoptosis, and necrosis, closely related to cancer treatment, have garnered increasing attention. Pyroptosis, a newly discovered form of programmed cell death, is characterized by the continuous expansion of cells until the cell membrane ruptures, leading to the release of cellular contents and triggering intense inflammatory responses.
+###Purpose: The primary objective of this study is to explore the role of pyroptosis-related genes in breast cancer and to develop a prognostic model to predict the survival of breast cancer patients. Additionally, by studying the impact of pyroptosis-related genes on the prognosis of breast cancer patients, new insights and strategies for the treatment of breast cancer may be provided.
+###Methods and Data Source Description
+###This study utilized data from the TCGA (Texas Cotton Ginners¡¯ Association) and GEO (Gene Expression Omnibus) databases. We collected RNA sequencing (RNA-seq) and clinical characteristic data of breast cancer and normal breast tissues for an in-depth gene expression analysis. Initially, data for 1109 breast cancer patients and 113 normal cases were obtained from the TCGA-BRCA project. The differentially expressed genes (DEGs) were identified using the ¡°limma¡± software package and confirmed by the Mann¨CWhitney¨CWilcoxon test. Subsequently, the interactions of these pyroptosis-related genes in breast cancer were explored through PPI network and correlation network analyses. Moreover, unsupervised clustering methods (such as Consensus Clustering, EM, and XMeans) were used for patient subtyping, and significant prognosis-related genes were screened through random forest and Lasso regression analysis.
+###Visualization and Interpretation of Results
+###The study results were displayed through various visualization methods, including heatmaps, PPI network graphs, and correlation network diagrams. For instance, the differential expression of pyroptosis-related genes between normal and breast cancer tissues was illustrated in heatmaps, while their interactions and correlations were revealed through PPI networks and correlation network diagrams. Additionally, the effectiveness of the constructed prognostic model was assessed using Kaplan-Meier curves, ROC curves, and PCA analysis. These analyses provided a deeper understanding of the role of pyroptosis-related genes in breast cancer and their significance in the prognostic model.
+
+##01.Extraction of cell pyroptosis genes
+
+```{R}
+
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#BiocManager::install("limma")
+
+
+library(limma)        # Load the package
+
+# Read input files and process the data
+rt=read.table("symbol.txt", header=T, sep="\t", check.names=F)
+rt=as.matrix(rt)
+rownames(rt)=rt[,1]
+exp=rt[,2:ncol(rt)]
+dimnames=list(rownames(exp), colnames(exp))
+data=matrix(as.numeric(as.matrix(exp)), nrow=nrow(exp), dimnames=dimnames)
+data=avereps(data)
+data=data[rowMeans(data)>0,]
+
+
+# Extract gene expression of pyroptosis genes
+gene=read.table("gene.txt", header=F, sep="\t", check.names=F)
+sameGene=intersect(as.vector(gene[,1]), rownames(data))
+geneExp=data[sameGene,]
+
+# Output the results
+out=rbind(ID=colnames(geneExp),geneExp)
+write.table(out,file="tcga.pyroptosisExp.txt",sep="\t",quote=F,col.names=F)
+```
+
+##02.Differential analysis of cell pyroptosis genes
+
+```{R}
+# # Check if the 'BiocManager' package is installed, and if not, install it.
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+
+
+# BiocManager::install("limma")
+# install.packages("pheatmap")
+
+# Load the required packages.
+library(limma)
+library(pheatmap)
+
+# Set the expression file and working directory.
+expFile = "tcga.pyroptosisExp.txt"  # Gene expression file
+#setwd("D:\\University_Malaya\\pyroptosis\\10.TCGAdiff")  # Set the working directory
+
+# Read the input file.
+rt <- read.table(expFile, header = TRUE, sep = "\t", check.names = FALSE)
+rt <- as.matrix(rt)
+rownames(rt) <- rt[, 1]
+exp <- rt[, 2:ncol(rt)] 
+dimnames <- list(rownames(exp), colnames(exp))
+data <- matrix(as.numeric(as.matrix(exp)), nrow = nrow(exp), dimnames = dimnames)
+data <- avereps(data)
+
+# Determine the number of normal and tumor samples.
+group <- sapply(strsplit(colnames(data), "\\-"), "[", 4)
+group <- sapply(strsplit(group, ""), "[", 1)
+group <- gsub("2", "1", group)
+conNum <- length(group[group == 1])       # Number of normal samples
+treatNum <- length(group[group == 0])     # Number of tumor samples
+sampleType <- c(rep(1, conNum), rep(2, treatNum))
+
+# Perform differential analysis.
+sigVec <- c()
+outTab <- data.frame()
+for (i in rownames(data)) {
+  if (sd(data[i, ]) < 0.001) {
+    next
+  }
+  wilcoxTest <- wilcox.test(data[i, ] ~ sampleType)
+  pvalue <- wilcoxTest$p.value
+  if (pvalue < 0.05) {
+    Sig <- ifelse(pvalue < 0.001, "***", ifelse(pvalue < 0.01, "**", ifelse(pvalue < 0.05, "*", "")) )
+    sigVec <- c(sigVec, paste0(i, Sig))
+    conGeneMeans <- mean(data[i, 1:conNum])
+    treatGeneMeans <- mean(data[i, (conNum + 1):ncol(data)])
+    logFC <- log2(treatGeneMeans) - log2(conGeneMeans)
+    outTab <- rbind(outTab, cbind(gene = i, conMean = conGeneMeans, treatMean = treatGeneMeans, logFC = logFC, pValue = pvalue))
+  }
+}
+
+# Output the differential analysis results.
+write.table(outTab, file = "diff.xls", sep = "\t", row.names = FALSE, quote = FALSE)
+write.table(outTab, file = "diff.txt", sep = "\t", row.names = FALSE, quote = FALSE)
+
+# Output the expression file of differential genes.
+exp <- data[as.vector(outTab[, 1]), ]
+expOut <- rbind(ID = colnames(exp), exp)
+write.table(expOut, file = "diffGeneExp.txt", sep = "\t", col.names = FALSE, quote = FALSE)
+
+# Create a heatmap of differential genes.
+exp <- log2(exp + 0.1)
+row.names(exp) <- sigVec
+Type <- c(rep("Normal", conNum), rep("Tumor", treatNum))
+names(Type) <- colnames(data)
+Type <- as.data.frame(Type)
+
+pdf(file = "heatmap.pdf", width = 9, height = 6)
+pheatmap(exp, 
+         annotation = Type, 
+         color = colorRampPalette(c(rep("blue", 5), "white", rep("red", 5)))(50),
+         cluster_cols = FALSE,
+         cluster_rows = TRUE,
+         scale = "row",
+         show_colnames = FALSE,
+         show_rownames = TRUE,
+         fontsize = 8,
+         fontsize_row = 8,
+         fontsize_col = 8)
+dev.off()
+```
+
+##03.Correlation
+
+```{R}
+
+# Install necessary packages
+#install.packages("reshape2")
+#install.packages("igraph")
+
+# Load required libraries
+library(igraph)
+library(reshape2)
+
+# Specify input files and parameters
+expFile = "diffGeneExp.txt"     # Expression input files
+cutoff = 0.2                    # Relevance threshold
+out = "correlation.pdf"         # Output result files
+#setwd("D:\\University_Malaya\\pyroptosis\\12.correlationn")
+
+# Read input data from a tab-separated file
+data = read.table(expFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+
+# Remove normal samples based on the sample naming convention
+group = sapply(strsplit(colnames(data), "\\-"), "[", 4)
+group = sapply(strsplit(group, ""), "[", 1)
+group = gsub("2", "1", group)
+rt = data[, group == 0]
+
+# Calculate the correlation matrix between genes
+data = t(rt)
+cordata = cor(data)
+
+# Keep only the upper triangular part of the correlation matrix
+mydata = cordata
+upper = upper.tri(mydata)
+mydata[upper] = NA
+
+# Convert the correlation matrix to a data frame
+df = data.frame(gene = rownames(mydata), mydata)
+dfmeltdata = melt(df, id = "gene")
+dfmeltdata = dfmeltdata[!is.na(dfmeltdata$value), ]
+dfmeltdata = dfmeltdata[dfmeltdata$gene != dfmeltdata$variable, ]
+dfmeltdata = dfmeltdata[abs(dfmeltdata$value) > cutoff, ]
+
+# Define the nodes and edges of the network graph
+corweight = dfmeltdata$value
+weight = corweight+abs(min(corweight))+5
+d = data.frame(p1=dfmeltdata$gene,p2=dfmeltdata$variable,weight=dfmeltdata$value)
+g = graph.data.frame(dfmeltdata,directed = FALSE)
+
+# Set colors, node sizes, and font sizes
+E(g)$weight = weight
+E(g)$color = ifelse(corweight > 0, rgb(254/255, 67/255, 101/255, abs(corweight)), rgb(0/255, 0/255, 255/255, abs(corweight)))
+V(g)$size = 8
+V(g)$shape = "circle"
+V(g)$lable.cex = 1.2
+V(g)$color = "white"
+
+# Visualize the network graph
+pdf(out, width = 7, height = 6)
+layout(matrix(c(1, 1, 1, 0, 2, 0), byrow = TRUE, nc = 3), height = c(6, 1), width = c(3, 4, 3))
+par(mar = c(1.5, 2, 2, 2))
+vertex.frame.color = NA
+plot(g, layout = layout_nicely, vertex.label.cex = V(g)$lable.cex, edge.width = E(g)$weight, edge.arrow.size = 0, vertex.label.color = "black", vertex.frame.color = vertex.frame.color, edge.color = E(g)$color, vertex.label.cex = V(g)$lable.cex, vertex.label.font = 2, vertex.size = V(g)$size, edge.curved = 0.4)
+
+# Create a color legend
+color_legend = c(rgb(254/255,67/255,101/255,seq(1,0,by=-0.01)),rgb(0/255,0/255,255/255,seq(0,1,by=0.01)))
+par(mar=c(2,2,1,2),xpd = T,cex.axis=1.6,las=1)
+barplot(rep(1,length(color_legend)),border = NA, space = 0,ylab="",xlab="",xlim=c(1,length(color_legend)),horiz=FALSE,
+        axes = F, col=color_legend,main="")
+axis(3,at=seq(1,length(color_legend),length=5),c(1,0.5,0,-0.5,-1),tick=FALSE)
+dev.off()
+```
+
+##04.Cluster
+
+```{R}
+# install.packages("survival")
+# 
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("limma")
+
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install(version = '3.18')
+# BiocManager::install("ConsensusClusterPlus")
+
+
+#Referencing packages
+library(limma)
+library(survival)
+library(ConsensusClusterPlus)
+# install.packages(ConsensusClusterPlus)
+expFile="tcga.pyroptosisExp.txt"     # Expression data files
+cliFile="time.txt"                   # Survival data files
+workDir="D:\\University_Malaya\\pyroptosis"       #Working Catalog
+#setwd(workDir)       # Set up a working directory
+
+# Read expression input files
+data=read.table(expFile, header=T, sep="\t", check.names=F, row.names=1)
+
+# Delete normal samples
+group=sapply(strsplit(colnames(data),"\\-"), "[", 4)
+group=sapply(strsplit(group,""), "[", 1)
+group=gsub("2", "1", group)
+data=data[,group==0]
+data=t(data)
+rownames(data)=gsub("(.*?)\\-(.*?)\\-(.*?)\\-.*", "\\1\\-\\2\\-\\3", rownames(data))
+data=avereps(data)
+data=log2(data+1)
+
+#Read survival data
+cli=read.table(cliFile,sep="\t",check.names=F,header=T,row.names=1)      #Read clinical files
+
+# Data merge and output results
+sameSample=intersect(row.names(data),row.names(cli))
+data=data[sameSample,]
+cli=cli[sameSample,]
+rt=cbind(cli,data)
+
+# Single factor COX analysis
+sigGenes=c()
+for(i in colnames(rt)[3:ncol(rt)]){
+  cox=coxph(Surv(futime, fustat) ~ rt[,i], data = rt)
+  coxSummary=summary(cox)
+  coxP=coxSummary$coefficients[,"Pr(>|z|)"]
+  if(coxP<0.05){ sigGenes=c(sigGenes,i) }
+}
+
+#Clustering
+maxK=9
+data=t(data[,sigGenes])
+results=ConsensusClusterPlus(data,
+                             maxK=maxK,
+                             reps=50,
+                             pItem=0.8,
+                             pFeature=1,
+                             title=workDir,
+                             clusterAlg="pam",
+                             distance="euclidean",
+                             seed=123456,
+                             plot="png")
+
+# Output typing results
+clusterNum=2         # Into several categories
+Cluster=results[[clusterNum]][["consensusClass"]]
+Cluster=as.data.frame(Cluster)
+Cluster[,1]=paste0("C", Cluster[,1])
+ClusterOut=rbind(ID=colnames(Cluster), Cluster)
+write.table(ClusterOut, file="cluster.txt", sep="\t", quote=F, col.names=F)
+```
+
+##05.ClusterSur
+
+```{R}
+
+# # Install packages
+# install.packages("survival")
+# install.packages("survminer")
+
+# Load libraries
+library(survival)
+library(survminer)
+
+# Define input files
+ClusterFile = "cluster.txt"   # Clustering results file
+cliFile = "time.txt"          # Survival data file
+
+# Read input files
+Cluster = read.table(ClusterFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+cli = read.table(cliFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+colnames(cli) = c("futime", "fustat")
+cli$futime = cli$futime / 365
+
+# Merge data
+sameSample = intersect(row.names(Cluster), row.names(cli))
+rt = cbind(cli[sameSample,, drop = FALSE], Cluster[sameSample,, drop = FALSE])
+
+# Survival analysis
+length = length(levels(factor(rt$Cluster)))
+diff = survdiff(Surv(futime, fustat) ~ Cluster, data = rt)
+pValue = 1 - pchisq(diff$chisq, df = length - 1)
+if (pValue < 0.001) {
+  pValue = "p<0.001"
+} else {
+  pValue = paste0("p=", sprintf("%.03f", pValue))
+}
+fit <- survfit(Surv(futime, fustat) ~ Cluster, data = rt)
+
+# Plot survival curves
+bioCol = c("#0066FF", "#FF9900", "#FF0000", "#6E568C", "#7CC767", "#223D6C", "#D20A13", "#FFD121", "#088247", "#11AA4D")
+bioCol = bioCol[1:length]
+surPlot = ggsurvplot(fit,
+                     data = rt,
+                     conf.int = FALSE,
+                     pval = pValue,
+                     pval.size = 6,
+                     legend.title = "Cluster",
+                     legend.labs = levels(factor(rt[,"Cluster"])),
+                     legend = c(0.8, 0.8),
+                     font.legend = 10,
+                     xlab = "Time (years)",
+                     break.time.by = 1,
+                     palette = bioCol,
+                     surv.median.line = "hv",
+                     risk.table = TRUE,
+                     cumevents = FALSE,
+                     risk.table.height = 0.25
+)
+pdf(file = "survival.pdf", onefile = FALSE, width = 7, height = 5.5)
+print(surPlot)
+dev.off()
+```
+
+##06.ClusterDiff
+
+```{R}
+# Check if the 'BiocManager' package is available, and install it if necessary
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("limma")
+# 
+# # Install the 'ggplot2' package
+# install.packages("ggplot2")
+
+# Load required packages
+library(limma)
+library(ggplot2)
+
+# Define input file paths
+expFile = "symbol.txt"        # Expression input file
+cluFile = "cluster.txt"       # Clustering result file
+logFCfilter = 0.585           # logFC filtering threshold (logFC = 0.585: Fold change = 1.5)
+fdrFilter = 0.05              # FDR filtering threshold
+
+# Read expression data file and format it
+rt = read.table(expFile, header = TRUE, sep = "\t", check.names = FALSE)
+rt = as.matrix(rt)
+rownames(rt) = rt[, 1]
+exp = rt[, 2:ncol(rt)]
+dimnames = list(rownames(exp), colnames(exp))
+data = matrix(as.numeric(as.matrix(exp)), nrow = nrow(exp), dimnames = dimnames)
+data = avereps(data)
+
+# Remove normal samples
+group = sapply(strsplit(colnames(data), "\\-"), "[", 4)
+group = sapply(strsplit(group, ""), "[", 1)
+group = gsub("2", "1", group)
+data = data[, group == 0]
+colnames(data) = gsub("(.*?)\\-(.*?)\\-(.*?)\\-.*", "\\1\\-\\2\\-\\3", colnames(data))
+
+# Read clustering result file
+Type = read.table(cluFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+sameSample = intersect(colnames(data), row.names(Type))
+data = data[, sameSample, drop = FALSE]
+Type = Type[sameSample,, drop = FALSE]
+
+# Extract samples from different clusters
+c1 = Type[Type$Cluster == "C1", , drop = FALSE]
+c2 = Type[Type$Cluster == "C2", , drop = FALSE]
+dataC1 = data[, row.names(c1)]
+dataC2 = data[, row.names(c2)]
+data = cbind(dataC1, dataC2)
+data = data[rowMeans(data) > 0.5,]
+conNum = ncol(dataC1)
+treatNum = ncol(dataC2)
+Type = c(rep(1, conNum), rep(2, treatNum))
+
+# Perform differential analysis
+outTab = data.frame()
+for (i in row.names(data)) {
+  rt = data.frame(expression = data[i, ], Type = Type)
+  wilcoxTest = wilcox.test(expression ~ Type, data = rt)
+  pvalue = wilcoxTest$p.value
+  conGeneMeans = mean(data[i, 1:conNum])
+  treatGeneMeans = mean(data[i, (conNum + 1):ncol(data)])
+  logFC = log2(treatGeneMeans) - log2(conGeneMeans)
+  conMed = median(data[i, 1:conNum])
+  treatMed = median(data[i, (conNum + 1):ncol(data)])
+  diffMed = treatMed - conMed
+  if (((logFC > 0) & (diffMed > 0)) | ((logFC < 0) & (diffMed < 0))) {
+    outTab = rbind(outTab, cbind(gene = i, Mean1 = conGeneMeans, Mean2 = treatGeneMeans, logFC = logFC, pValue = pvalue))
+  }
+}
+pValue = outTab[, "pValue"]
+fdr = p.adjust(as.numeric(as.vector(pValue)), method = "fdr")
+outTab = cbind(outTab, fdr = fdr)
+
+# Output differential table
+outDiff = outTab[(abs(as.numeric(as.vector(outTab$logFC))) > logFCfilter & as.numeric(as.vector(outTab$fdr)) < fdrFilter), ]
+write.table(outDiff, file = "diff.txt", sep = "\t", row.names = FALSE, quote = FALSE)
+
+# Output expression file for differentially expressed genes
+diffExp = rbind(ID = colnames(data[as.vector(outDiff[, 1]), ]), data[as.vector(outDiff[, 1]), ])
+write.table(diffExp, file = "diffGeneExp.txt", sep = "\t", col.names = FALSE, quote = FALSE)
+```
+
+##07.ClusterHeatmap
+
+```{R}
+# Check if the 'BiocManager' package is available, and install it if necessary
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("limma")
+
+# Install the 'pheatmap' package
+#install.packages("pheatmap")
+
+# Load required packages
+library(limma)
+library(pheatmap)
+
+# Define input file paths
+expFile = "diffGeneExp.txt"  # Expression data file
+ClusterFile = "cluster.txt"  # Clustering data file
+cliFile = "clinical.txt"     # Clinical data file
+
+# Read the expression data file
+exp = read.table(expFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+
+# Read the clustering data
+Cluster = read.table(ClusterFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+
+# Read the clinical data file
+cli = read.table(cliFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+
+# Merge data
+samSample = intersect(row.names(Cluster), row.names(cli))
+cli = cli[samSample,, drop = FALSE]
+Cluster = Cluster[samSample,, drop = FALSE]
+Type = cbind(Cluster, cli)
+Type = Type[order(Type$Cluster),, drop = FALSE]
+exp = exp[, row.names(Type)]
+
+# Iterate through clinical traits to obtain significance labels
+sigVec = c("Cluster")
+for (clinical in colnames(Type[, 2:ncol(Type)])) {
+  data = Type[c("Cluster", clinical)]
+  colnames(data) = c("Cluster", "clinical")
+  data = data[data[,"clinical"] != "unknow", ]
+  tableStat = table(data)
+  stat = chisq.test(tableStat)
+  pvalue = stat$p.value
+  Sig = ifelse(pvalue < 0.001, "***", ifelse(pvalue < 0.01, "**", ifelse(pvalue < 0.05, "*", "")))
+  sigVec = c(sigVec, paste0(clinical, Sig))
+}
+colnames(Type) = sigVec
+
+# Define heatmap annotation colors
+colorList = list()
+bioCol = c("#0066FF", "#FF0000", "#ed1299", "#0dbc21", "#246b93", "#cc8e12", "#d561dd",
+           "#6ad157", "#f7aa5d", "#9ed84e", "#39ba30", "#373bbf", "#a1ce4c", "#ef3bb6", "#d66551",
+           "#1a918f", "#ddd53e", "#ff66fc", "#2927c4", "#57e559", "#8e3af4", "#f9a270", "#22547f", "#db5e92",
+           "#4aef7b", "#e86502", "#99db27", "#e07233", "#8249aa", "#cebb10", "#03827f", "#931635", "#ff523f",
+           "#edd05e", "#6f25e8", "#0dbc21", "#167275", "#280f7a", "#6373ed", "#5b910f", "#7b34c1", "#0cf29a", "#d80fc1",
+           "#dd27ce", "#07a301", "#391c82", "#2baeb5", "#925bea", "#09f9f5", "#63ff4f")
+j=0
+for(cli in colnames(Type[,1:ncol(Type)])){
+  cliLength=length(levels(factor(Type[,cli])))
+  cliCol=bioCol[(j+1):(j+cliLength)]
+  j=j+cliLength
+  names(cliCol)=levels(factor(Type[,cli]))
+  if("unknow" %in% levels(factor(Type[,cli]))){
+    cliCol["unknow"]="grey75"}
+  colorList[[cli]]=cliCol
+}
+
+# Visualize the heatmap
+pdf("heatmap.pdf", width = 8.5, height = 6)
+exp = log2(exp + 0.01)
+pheatmap(exp,
+         annotation = Type,
+         annotation_colors = colorList,
+         color = colorRampPalette(c(rep("blue", 5), "white", rep("red", 5)))(100),
+         cluster_cols = FALSE,
+         cluster_rows = FALSE,
+         scale = "row",
+         show_colnames = FALSE,
+         show_rownames = TRUE,
+         fontsize = 6,
+         fontsize_row = 1,
+         fontsize_col = 6)
+dev.off()
+```
+
+##08.Typing differential gene expression
+
+```{R}
+# # Install required packages if not already installed
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("limma")
+# 
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("sva")
+
+# Load necessary packages
+library(limma)
+library(sva)
+
+# Set file paths and working directory
+tcgaExpFile = "symbol.txt"      # TCGA expression data file
+geoExpFile = "geoMatrix.txt"    # GEO expression data file
+geneFile = "diff.txt"           # Gene list file
+
+rt=read.table(tcgaExpFile, header=T, sep="\t", check.names=F)
+rt=as.matrix(rt)
+rownames(rt)=rt[,1]
+exp=rt[,2:ncol(rt)]
+dimnames=list(rownames(exp),colnames(exp))
+tcga=matrix(as.numeric(as.matrix(exp)),nrow=nrow(exp),dimnames=dimnames)
+tcga=avereps(tcga)
+tcga=log2(tcga+1) 
+
+# Remove normal samples
+group = sapply(strsplit(colnames(tcga), "\\-"), "[", 4)
+group = sapply(strsplit(group, ""), "[", 1)
+group = gsub("2", "1", group)
+tcga = tcga[, group == 0]
+tcga = t(tcga)
+rownames(tcga) = gsub("(.*?)\\-(.*?)\\-(.*?)\\-.*", "\\1\\-\\2\\-\\3", rownames(tcga))
+tcga = t(avereps(tcga))
+
+# Read GEO gene expression file and process the data
+rt = read.table(geoExpFile, header = TRUE, sep = "\t", check.names = FALSE)
+rt = as.matrix(rt)
+rownames(rt) = rt[, 1]
+exp = rt[, 2:ncol(rt)]
+dimnames = list(rownames(exp), colnames(exp))
+geo = matrix(as.numeric(as.matrix(exp)), nrow = nrow(exp), dimnames = dimnames)
+geo = avereps(geo)
+
+# If GEO data is not log2-transformed, automatically apply log2 transformation
+qx = as.numeric(quantile(geo, c(0, 0.25, 0.5, 0.75, 0.99, 1.0), na.rm = TRUE))
+LogC = (qx[5] > 100) || ((qx[6] - qx[1]) > 50 && qx[2] > 0)
+if (LogC) {
+  geo[geo < 0] = 0
+  geo = log2(geo + 1)
+}
+geo = normalizeBetweenArrays(geo)
+
+# Get the intersection of genes and their expression in both TCGA and GEO datasets
+sameGene = intersect(row.names(tcga), row.names(geo))
+tcgaOut = tcga[sameGene,]
+geoOut = geo[sameGene,]
+
+# Batch correction
+all = cbind(tcgaOut, geoOut)
+batchType = c(rep(1, ncol(tcgaOut)), rep(2, ncol(geoOut)))
+outTab = ComBat(all, batchType, par.prior = TRUE)
+tcgaOut = outTab[, colnames(tcgaOut)]
+tcgaOut[tcgaOut < 0] = 0
+geoOut = outTab[, colnames(geoOut)]
+geoOut[geoOut < 0] = 0
+
+# Output the corrected data
+tcgaTab = rbind(ID = colnames(tcgaOut), tcgaOut)
+write.table(tcgaTab, file = "TCGA.normalize.txt", sep = "\t", quote = FALSE, col.names = FALSE)
+geoTab = rbind(ID = colnames(geoOut), geoOut)
+write.table(geoTab, file = "GEO.normalize.txt", sep = "\t", quote = FALSE, col.names = FALSE)
+
+# Get the expression of differentially expressed genes
+gene = read.table(geneFile, header = TRUE, sep = "\t", check.names = FALSE)
+sameGene = intersect(as.vector(gene[, 1]), rownames(tcgaOut))
+tcgaShareExp = tcgaOut[sameGene,]
+geoShareExp = geoOut[sameGene,]
+
+# Output the expression of differentially expressed genes
+tcgaShareExp = rbind(ID = colnames(tcgaShareExp), tcgaShareExp)
+write.table(tcgaShareExp, file = "TCGA.share.txt", sep = "\t", quote = FALSE, col.names = FALSE)
+geoShareExp = rbind(ID = colnames(geoShareExp), geoShareExp)
+write.table(geoShareExp, file = "GEO.share.txt", sep = "\t", quote = FALSE, col.names = FALSE)
+```
+
+##09.tcgaMergeTime
+
+```{R}
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("limma")
+
+library(limma)               # Load the package
+expFile = "tcga.share.txt"     # Expression data file
+cliFile = "time.txt"           # Survival data file
+
+# Read the expression file and preprocess the input file
+rt = read.table(expFile, header = TRUE, sep = "\t", check.names = FALSE)
+rt = as.matrix(rt)
+rownames(rt) = rt[, 1]
+exp = rt[, 2:ncol(rt)]
+dimnames = list(rownames(exp), colnames(exp))
+data = matrix(as.numeric(as.matrix(exp)), nrow = nrow(exp), dimnames = dimnames)
+data = avereps(data)
+data = data[rowMeans(data) > 0,]
+data = t(data)
+
+
+
+rownames(data)=gsub("(.*?)\\-(.*?)\\-(.*?)\\-.*", "\\1\\-\\2\\-\\3", rownames(data))
+
+
+# Read the survival data
+cli = read.table(cliFile, sep = "\t", check.names = FALSE, header = TRUE, row.names = 1)     # Read the clinical file
+
+# Merge the data and output the result
+sameSample = intersect(row.names(data), row.names(cli))
+data = data[sameSample,]
+cli = cli[sameSample,]
+out = cbind(cli, data)
+out = cbind(id = row.names(out), out)
+write.table(out, file = "tcga.expTime.txt", sep = "\t", row.names = FALSE, quote = FALSE)
+
+```
+
+##10.geoMergeTime
+
+```{R}
+
+# # Check if the "BiocManager" package is available; if not, install it
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("limma")
+
+library(limma)                # Load the package
+expFile = "geo.share.txt"     # Expression data file
+cliFile = "time.txt"          # Survival data file
+
+# Read the expression file and preprocess the input file
+rt = read.table(expFile, sep = "\t", header = TRUE, check.names = FALSE)
+rt = as.matrix(rt)
+rownames(rt) = rt[, 1]
+exp = rt[, 2:ncol(rt)]
+dimnames = list(rownames(exp), colnames(exp))
+data = matrix(as.numeric(as.matrix(exp)), nrow = nrow(exp), dimnames = dimnames)
+data = avereps(data)
+data = data[rowMeans(data) > 0, ]
+data = t(data)
+
+# Read the survival data
+cli = read.table(cliFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)     # Read the clinical file
+
+# Merge the data and output the results
+sameSample = intersect(row.names(data), row.names(cli))
+data = data[sameSample, ]
+cli = cli[sameSample, ]
+out = cbind(cli, data)
+out = cbind(id = row.names(out), out)
+write.table(out, file = "geo.expTime.txt", sep = "\t", row.names = FALSE, quote = FALSE)
+#==============================================================================#
+```
+
+##11.Prognosis related genes/uniCox
+
+```{R}
+# # Install the 'survival' package
+# install.packages('survival')
+
+# Load the 'survival' library
+library(survival)
+
+# Significance filtering threshold
+coxPfilter = 0.5
+
+# Input file
+inputFile = "tcga.expTime.txt"
+
+# Read the input file
+rt = read.table(inputFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+
+# Convert 'futime' to years
+rt$futime = rt$futime / 365
+
+# Iterate over genes to find prognostic-related genes
+outTab = data.frame()
+sigGenes = c("futime", "fustat")
+
+for (i in colnames(rt[, 3:ncol(rt)])) {
+  # Cox analysis
+  cox <- coxph(Surv(futime, fustat) ~ rt[, i], data = rt)
+  coxSummary = summary(cox)
+  coxP = coxSummary$coefficients[, "Pr(>|z|)"]
+  
+  # Retain prognostic-related genes
+  if(coxP<coxPfilter){
+    sigGenes=c(sigGenes,i)
+    outTab=rbind(outTab,
+                 cbind(id=i,
+                       HR=coxSummary$conf.int[,"exp(coef)"],
+                       HR.95L=coxSummary$conf.int[,"lower .95"],
+                       HR.95H=coxSummary$conf.int[,"upper .95"],
+                       pvalue=coxSummary$coefficients[,"Pr(>|z|)"])
+    )
+  }
+}
+
+# Output results of the univariate analysis
+write.table(outTab, file = "tcga.uniCox.txt", sep = "\t", row.names = FALSE, quote = FALSE)
+
+# Output the expression of significantly associated genes
+uniSigExp = rt[, sigGenes]
+uniSigExp = cbind(id = row.names(uniSigExp), uniSigExp)
+write.table(uniSigExp, file = "tcga.uniSigExp.txt", sep = "\t", row.names = FALSE, quote = FALSE)
+
+############ Function for Creating a Forest Plot ############
+bioForest = function(coxFile = NULL, forestFile = NULL, forestCol = NULL) {
+  # Read the input file
+  rt <- read.table(coxFile, header = TRUE, sep = "\t", row.names = 1, check.names = FALSE)
+  gene <- rownames(rt)
+  hr <- sprintf("%.3f", rt$"HR")
+  hrLow <- sprintf("%.3f", rt$"HR.95L")
+  hrHigh <- sprintf("%.3f", rt$"HR.95H")
+  Hazard.ratio <- paste0(hr, "(", hrLow, "-", hrHigh, ")")
+  pVal <- ifelse(rt$pvalue < 0.001, "<0.001", sprintf("%.3f", rt$pvalue))
+  
+  # Output the plot
+  height = nrow(rt) / 12.5 + 5
+  pdf(file = forestFile, width = 7, height = height)
+  n <- nrow(rt)
+  nRow <- n + 1
+  ylim <- c(1, nRow)
+  layout(matrix(c(1, 2), nc = 2), width = c(3, 2.5))
+  
+  # Plot clinical information on the left side of the forest plot
+  xlim = c(0, 3)
+  par(mar = c(4, 2.5, 2, 1))
+  plot(1, xlim = xlim, ylim = ylim, type = "n", axes = FALSE, xlab = "", ylab = "")
+  text.cex = 0.8
+  text(0, n:1, gene, adj = 0, cex = text.cex)
+  text(1.5 - 0.5 * 0.2, n:1, pVal, adj = 1, cex = text.cex)
+  text(1.5 - 0.5 * 0.2, n + 1, 'pvalue', cex = text.cex, font = 2, adj = 1)
+  text(3, n:1, Hazard.ratio, adj = 1, cex = text.cex)
+  text(3, n + 1, 'Hazard ratio', cex = text.cex, font = 2, adj = 1)
+  
+  # Plot the forest plot
+  par(mar = c(4, 1, 2, 1), mgp = c(2, 0.5, 0))
+  xlim = c(0, max(as.numeric(hrLow), as.numeric(hrHigh)))
+  plot(1, xlim = xlim, ylim = ylim, type = "n", axes = FALSE, ylab = "", xaxs = "i", xlab = "Hazard ratio")
+  arrows(as.numeric(hrLow), n:1, as.numeric(hrHigh), n:1, angle = 90, code = 3, length = 0.05, col = "darkblue", lwd = 2.5)
+  abline(v = 1, col = "black", lty = 2, lwd = 2)
+  boxcolor = ifelse(as.numeric(hr) > 1, forestCol[1], forestCol[2])
+  points(as.numeric(hr), n:1, pch = 15, col = boxcolor, cex = 1.6)
+  axis(1)
+  dev.off()
+}
+
+# Create a forest plot
+bioForest(coxFile = "tcga.uniCox.txt", forestFile = "forest.pdf", forestCol = c("red", "green"))
+```
+
+##12.Construction of prognostic model
+
+```{R}
+# Install packages
+# install.packages("glmnet")
+# install.packages("survival")
+# install.packages("neuralnet")
+# install.packages("rpart.plot")
+
+# Load libraries
+library("neuralnet")
+library("glmnet")
+library("survival")
+library("rpart")
+library(rpart.plot)
+
+coxSigFile = "tcga.uniSigExp.txt"     # Expression file of TCGA significant genes for Cox analysis
+geoFile = "geo.expTime.txt"           # Input file from the GEO database
+
+# Read files and prepare the input files
+rt = read.table(coxSigFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+geo = read.table(geoFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+sameGene = intersect(colnames(rt)[3:ncol(rt)], colnames(geo)[3:ncol(geo)])
+rt = rt[, c("futime", "fustat", sameGene)]
+rt$futime[rt$futime <= 0] = 0.003
+
+sameCol = intersect(colnames(rt), colnames(geo))
+geo2 = subset(geo, select = c(sameCol))
+geo2$futime <- geo2$futime / 365
+tcga2 = subset(rt, select = c(sameCol))
+all_data = rbind(geo2, tcga2)
+all_data$futime[all_data$futime < 1] = 0.5
+
+set.seed(110)  # Set a random seed for reproducibility
+
+# Split the data into a 70% training set and a 30% test set
+sample_size <- floor(0.7 * nrow(all_data))  # Calculate the size of the training set
+train_index <- sample(1:nrow(all_data), sample_size)  # Generate random indices for the training set
+train_set <- all_data[train_index, ]  # Create the training set
+test_set <- all_data[-train_index, ]  # Create the test set
+
+fustat1 <- train_set$fustat
+futime1 <- train_set$futime
+surdata1 <- Surv(train_set$futime, train_set$fustat)
+fustat2 <- test_set$fustat
+futime2 <- test_set$futime
+surdata2 <- Surv(test_set$futime, test_set$fustat)
+train1 <- cbind(train_set[, 3:ncol(train_set)], fustat1)
+train2 <- cbind(train_set[, 3:ncol(train_set)], futime1)
+test1 <- cbind(test_set[, 3:ncol(test_set)], fustat2)
+test2 <- cbind(test_set[, 3:ncol(test_set)], futime2)
+
+# Build decision trees for predicting survival status
+tree_model1 <- rpart(train1$fustat1 ~ ., data = train1, method = "class")
+# Build decision trees for predicting survival time
+tree_model2 <- rpart(train2$futime1 ~ ., data = train2, method = "anova")
+
+# Visualize the decision tree for survival status prediction
+prp(tree_model1, type = 1, extra = "auto")
+
+# Visualize the decision tree for survival time prediction
+prp(tree_model2, type = 2, extra = "auto")
+
+# Predict survival status for the test set
+predicted_class_test <- predict(tree_model1, test1[, 1:ncol(test1) - 1], type = "class")
+# Predict survival time for the test set
+predicted_time_test <- predict(tree_model2, test1[, 1:ncol(test1) - 1])
+# Predict survival status for the training set
+predicted_class_train <- predict(tree_model1, train1[, 1:ncol(train1) - 1], type = "class")
+# Predict survival time for the training set
+predicted_time_train <- predict(tree_model2, train1[, 1:ncol(train1) - 1])
+risk_test = as.vector(ifelse(predicted_class_test == 1, "high", "low"))
+risk_train = as.vector(ifelse(predicted_class_train == 1, "high", "low"))
+
+# Combine the predictions with the original data for the test set
+outTab1 = cbind(train_set, riskScore = as.vector(predicted_time_train), risk = risk_train)
+# Combine the predictions with the original data for the training set
+outTab2 = cbind(test_set, riskScore = as.vector(predicted_class_test), risk = risk_test)
+
+# Write the results to files
+write.table(cbind(id = rownames(outTab1), outTab1), file = "trainRisk.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(cbind(id = rownames(outTab2), outTab2), file = "testRisk.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+```
+
+##13.Survival Analysis
+
+```{R}
+# Install packages
+# install.packages("survival")
+# install.packages("survminer")
+
+# Load libraries
+library(survival)
+library(survminer)
+
+
+# Function to plot survival curves
+bioSurvival = function(inputFile = NULL, outFile = NULL) {
+  # Read the input file
+  rt = read.table(inputFile, header = TRUE, sep = "\t", check.names = FALSE)
+  
+  # Compare survival differences between high and low-risk groups and obtain significance p-value
+  diff = survdiff(Surv(futime, fustat) ~ risk, data = rt)
+  pValue = 1 - pchisq(diff$chisq, df = 1)
+  if (pValue < 0.001) {
+    pValue = "p < 0.001"
+  } else {
+    pValue = paste0("p = ", sprintf("%.03f", pValue))
+  }
+  fit = survfit(Surv(futime, fustat) ~ risk, data = rt)
+  
+  # Plot survival curves
+  surPlot = ggsurvplot(fit,
+                       data = rt,
+                       conf.int = TRUE,
+                       pval = pValue,
+                       pval.size = 6,
+                       legend.title = "Risk",
+                       legend.labs = c("High risk", "Low risk"),
+                       xlab = "Time (years)",
+                       break.time.by = 1,
+                       palette = c("red", "blue"),
+                       risk.table = TRUE,
+                       risk.table.title = "",
+                       risk.table.height = 0.25
+  )
+  pdf(file = outFile, onefile = FALSE, width = 6.5, height = 5.5)
+  print(surPlot)
+  dev.off()
+}
+
+# Generate survival plots for the training and test datasets
+bioSurvival(inputFile = "trainRisk.txt", outFile = "trainSurv.pdf")
+bioSurvival(inputFile = "testRisk.txt", outFile = "testSurv.pdf")
+
+```
+
+##14.ROC curve
+
+```{R}
+#Install necessary packages
+# install.packages("survival")
+# install.packages("survminer")
+# install.packages("timeROC")
+
+# Load required libraries
+library(survival)
+library(survminer)
+library(timeROC)
+
+
+# Define a function for drawing ROC curves
+bioROC = function(inputFile = NULL, rocFile = NULL) {
+  # Read the input file
+  rt = read.table(inputFile, header = TRUE, sep = "\t", check.names = FALSE)
+  # Generate ROC curves
+  ROC_rt = timeROC(T = rt$futime, delta = rt$fustat,
+                   marker = rt$riskScore, cause = 1,
+                   weighting = 'aalen',
+                   times = c(1, 3, 5), ROC = TRUE)
+  pdf(file = rocFile, width = 10, height = 10)
+  plot(ROC_rt, time = 1, col = 'green', title = FALSE, lwd = 2)
+  plot(ROC_rt, time = 3, col = 'blue', add = TRUE, title = FALSE, lwd = 2)
+  plot(ROC_rt, time = 5, col = 'red', add = TRUE, title = FALSE, lwd = 2)
+  legend('bottomright',
+         c(paste0('AUC at 1 year: ', sprintf("%.03f", ROC_rt$AUC[1])),
+           paste0('AUC at 3 years: ', sprintf("%.03f", ROC_rt$AUC[2])),
+           paste0('AUC at 5 years: ', sprintf("%.03f", ROC_rt$AUC[3]))),
+         col = c("green", "blue", "red"), lwd = 2, bty = 'n')
+  dev.off()
+}
+
+# Generate ROC curves for the training data
+bioROC(inputFile = "trainRisk.txt", rocFile = "train.ROC.pdf")
+# Generate ROC curves for the test data
+bioROC(inputFile = "testRisk.txt", rocFile = "test.ROC.pdf")
+
+```
+
+##15.Risk curve
+
+```{R}
+
+# Install the 'pheatmap' package
+#install.packages("pheatmap")
+
+# Load required libraries
+library(pheatmap)
+
+
+# Define a function for plotting risk curves
+bioRiskPlot = function(inputFile = NULL, riskScoreFile = NULL, survStatFile = NULL) {
+  rt = read.table(inputFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)  # Read the input file
+  rt$riskScore[rt$riskScore > quantile(rt$riskScore, 0.99)] = quantile(rt$riskScore, 0.99)
+  rt$risk = factor(rt$risk, levels = c("low", "high"))
+  rt = rt[order(rt$riskScore), ]  # Sort samples by risk score
+  
+  # Plot risk curves
+  riskClass = rt[, "risk"]
+  lowLength = length(riskClass[riskClass == "low"])
+  highLength = length(riskClass[riskClass == "high"])
+  lowMax = max(rt$riskScore[riskClass == "low"])
+  line = rt[, "riskScore"]
+  pdf(file = riskScoreFile, width = 6, height = 5)
+  plot(line, type = "p", pch = 20,
+       xlab = "Patients (increasing risk score)", ylab = "Risk score",
+       col = c(rep("blue", lowLength), rep("red", highLength)))
+  abline(h = lowMax, v = lowLength, lty = 2)
+  legend("topleft", c("High risk", "Low Risk"), bty = "n", pch = 19, col = c("red", "blue"), cex = 1.2)
+  dev.off()
+  
+  # Plot survival status
+  color = as.vector(rt$fustat)
+  color[color == 1] = "red"
+  color[color == 0] = "blue"
+  pdf(file = survStatFile, width = 6, height = 5)
+  plot(rt$futime, pch = 19,
+       xlab = "Patients (increasing risk score)", ylab = "Survival time (years)",
+       col = color)
+  legend("topleft", c("Dead", "Alive"), bty = "n", pch = 19, col = c("red", "blue"), cex = 1.2)
+  abline(v = lowLength, lty = 2)
+  dev.off()
+}
+
+# Call the function to plot risk curves for the training data
+bioRiskPlot(inputFile = "trainRisk.txt",
+            riskScoreFile = "train.riskScore.pdf",
+            survStatFile = "train.survStat.pdf")
+
+# Call the function to plot risk curves for the test data
+bioRiskPlot(inputFile = "testRisk.txt",
+            riskScoreFile = "test.riskScore.pdf",
+            survStatFile = "test.survStat.pdf")
+```
+
+##16.PCA and t-SNE analysis
+
+```{R}
+# Install the required packages
+# install.packages("Rtsne")
+# install.packages("ggplot2")
+
+# Load the necessary libraries
+library(Rtsne)
+library(ggplot2)
+
+# Define a function for performing PCA and t-SNE analysis
+bioPCA = function(inputFile = NULL, pcaFile = NULL, tsneFile = NULL) {
+  # Read the input file and extract data
+  rt = read.table(inputFile, header = TRUE, sep = "\t", check.names = FALSE, row.names = 1)
+  data = rt[, c(3:(ncol(rt) - 2))]  # Fix the subsetting here
+  risk = rt[, "risk"]
+  
+  # Perform PCA analysis
+  data.pca = prcomp(data, scale. = TRUE)
+  pcaPredict = predict(data.pca)
+  PCA = data.frame(PC1 = pcaPredict[, 1], PC2 = pcaPredict[, 2], risk = risk)
+  
+  
+  # Plot the PCA graph
+  pdf(file = pcaFile, height = 4.5, width = 5.5)  # Save the output file
+  p = ggplot(data = PCA, aes(PC1, PC2)) + geom_point(aes(color = risk)) +
+    scale_colour_manual(name = "Risk", values = c("red", "blue")) +
+    theme_bw() +
+    theme(plot.margin = unit(rep(1.5, 4), 'lines')) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  print(p)
+  dev.off()
+  
+  # Perform t-SNE analysis
+  tsneOut = Rtsne(data, dims = 2, perplexity = 10, verbose = FALSE, max_iter = 500, check_duplicates = FALSE)
+  tsne = data.frame(tSNE1 = tsneOut$Y[, 1], tSNE2 = tsneOut$Y[, 2], risk = risk)
+  
+  # Plot the t-SNE graph
+  pdf(file = tsneFile, height = 4.5, width = 5.5)  # Save the output file
+  p = ggplot(data = tsne, aes(tSNE1, tSNE2)) + geom_point(aes(color = risk)) +
+    scale_colour_manual(name = "Risk", values = c("red", "blue")) +
+    theme_bw() +
+    theme(plot.margin = unit(rep(1.5, 4), 'lines')) +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+  print(p)
+  dev.off()
+}
+
+# Call the function to perform PCA and t-SNE analysis for the training data
+bioPCA(inputFile = "trainRisk.txt", pcaFile = "train.PCA.pdf", tsneFile = "train.t-SNE.pdf")
+# Call the function to perform PCA and t-SNE analysis for the test data
+bioPCA(inputFile = "testRisk.txt", pcaFile = "test.PCA.pdf", tsneFile = "test.t-SNE.pdf")
+```
+
+##Conclusion Section
+###This study successfully constructed a breast cancer prognostic model by analyzing pyroptosis-related genes, effectively distinguishing between high-risk and low-risk breast cancer patients. The results showed that four significant pyroptosis-related genes (ELOVL2, IGLV6-57, FGBP1, and HLA-DPB2) are closely associated with the overall survival of breast cancer patients. Furthermore, biological function and immune microenvironment analysis of the high-risk and low-risk patient groups provided new insights into the treatment of breast cancer.
+
+
+
+
+
+
+
+
+
+
